@@ -1,0 +1,134 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #f07316;
+  --color-success: #10b981;
+  --color-danger: #ef4444;
+  --color-warning: #f59e0b;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #0d0e10;
+  color: #e2e3e5;
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1b1e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3f4145;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4c4e54;
+}
+
+/* 动画 */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(240, 115, 22, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(240, 115, 22, 0.8);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* 价格上涨/下跌颜色 */
+.price-up {
+  color: #10b981;
+}
+
+.price-down {
+  color: #ef4444;
+}
+
+/* 卡片样式 */
+.card {
+  @apply bg-dark-800 rounded-xl border border-dark-700 p-6;
+}
+
+/* 按钮样式 */
+.btn {
+  @apply px-4 py-2 rounded-lg font-medium transition-all duration-200;
+}
+
+.btn-primary {
+  @apply bg-primary-500 hover:bg-primary-600 text-white;
+}
+
+.btn-secondary {
+  @apply bg-dark-700 hover:bg-dark-600 text-white;
+}
+
+.btn-danger {
+  @apply bg-red-500 hover:bg-red-600 text-white;
+}
+
+/* 输入框样式 */
+.input {
+  @apply w-full px-4 py-2 bg-dark-900 border border-dark-700 rounded-lg text-white placeholder-dark-400 focus:outline-none focus:border-primary-500 transition-colors;
+}
+
+/* 表格样式 */
+.table {
+  @apply w-full text-left;
+}
+
+.table th {
+  @apply px-4 py-3 text-dark-300 font-medium text-sm uppercase tracking-wider border-b border-dark-700;
+}
+
+.table td {
+  @apply px-4 py-4 border-b border-dark-800;
+}
+
+.table tr:hover td {
+  @apply bg-dark-800/50;
+}
+
+
+/* Modal过渡动画 */
+.modal-enter-active {
+  animation: modal-in 0.3s ease-out;
+}
+
+.modal-leave-active {
+  animation: modal-out 0.2s ease-in;
+}
+
+@keyframes modal-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes modal-out {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
