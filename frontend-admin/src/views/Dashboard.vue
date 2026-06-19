@@ -1,13 +1,12 @@
 <template>
   <div class="p-6 space-y-6">
-    <!-- 页面标题 -->
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-bold text-white">仪表盘</h1>
-        <p class="text-dark-400 mt-1">实时监控BTC行情数据</p>
+        <p class="text-dark-400 mt-1">实时监控BTC行情与预警状态</p>
       </div>
       <div class="flex items-center gap-2 text-sm">
-        <span 
+        <span
           class="w-2 h-2 rounded-full"
           :class="wsConnected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'"
         ></span>
@@ -17,9 +16,7 @@
       </div>
     </div>
 
-    <!-- 价格概览卡片 -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-      <!-- 当前价格 - 大卡片 -->
       <div class="card lg:col-span-2 bg-gradient-to-br from-dark-800 to-dark-900">
         <div class="flex items-center justify-between">
           <div>
@@ -42,19 +39,16 @@
         </div>
       </div>
 
-      <!-- 24h 最高 -->
       <div class="card">
         <p class="text-dark-400 text-xs mb-1">24h 最高</p>
         <p class="text-xl font-semibold text-white">${{ formatPrice(priceData.high_24h) }}</p>
       </div>
 
-      <!-- 24h 最低 -->
       <div class="card">
         <p class="text-dark-400 text-xs mb-1">24h 最低</p>
         <p class="text-xl font-semibold text-white">${{ formatPrice(priceData.low_24h) }}</p>
       </div>
 
-      <!-- 24h 涨跌额 -->
       <div class="card">
         <p class="text-dark-400 text-xs mb-1">24h 涨跌</p>
         <p class="text-xl font-semibold" :class="priceData.price_change_24h >= 0 ? 'text-green-400' : 'text-red-400'">
@@ -63,75 +57,125 @@
       </div>
     </div>
 
-    <!-- K线图 -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <router-link to="/alerts" class="card hover:border-green-500/50 transition-colors cursor-pointer">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-green-500/10 rounded-lg flex items-center justify-center">
+            <svg class="w-5 h-5 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+          </div>
+          <div>
+            <p class="text-2xl font-bold text-white">{{ alertStats.active }}</p>
+            <p class="text-dark-400 text-sm">监控中</p>
+          </div>
+        </div>
+      </router-link>
+
+      <router-link to="/alerts?status=triggered" class="card hover:border-red-500/50 transition-colors cursor-pointer">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-red-500/10 rounded-lg flex items-center justify-center">
+            <svg class="w-5 h-5 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+          </div>
+          <div>
+            <p class="text-2xl font-bold text-white">{{ alertStats.triggered }}</p>
+            <p class="text-dark-400 text-sm">已触发</p>
+          </div>
+        </div>
+      </router-link>
+
+      <router-link to="/alerts?status=recovered" class="card hover:border-yellow-500/50 transition-colors cursor-pointer">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-yellow-500/10 rounded-lg flex items-center justify-center">
+            <svg class="w-5 h-5 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+          </div>
+          <div>
+            <p class="text-2xl font-bold text-white">{{ alertStats.recovered }}</p>
+            <p class="text-dark-400 text-sm">已恢复待确认</p>
+          </div>
+        </div>
+      </router-link>
+
+      <router-link to="/history" class="card hover:border-blue-500/50 transition-colors cursor-pointer">
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 bg-blue-500/10 rounded-lg flex items-center justify-center">
+            <svg class="w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </div>
+          <div>
+            <p class="text-2xl font-bold text-white">{{ alertStats.pendingEvents }}</p>
+            <p class="text-dark-400 text-sm">待处理事件</p>
+          </div>
+        </div>
+      </router-link>
+    </div>
+
     <div class="card">
       <div class="flex items-center justify-between mb-4">
         <div class="flex items-center gap-4">
           <h3 class="text-lg font-medium text-white">价格走势</h3>
           <span class="text-dark-500 text-sm">成交量: {{ formatVolume(priceData.volume_24h) }}</span>
         </div>
-        <div class="flex gap-1 bg-dark-900 p-1 rounded-lg">
-          <button
-            v-for="interval in intervals"
-            :key="interval.value"
-            @click="selectedInterval = interval.value"
-            class="px-3 py-1.5 text-sm rounded-md transition-colors"
-            :class="selectedInterval === interval.value ? 'bg-primary-500 text-white' : 'text-dark-400 hover:text-white'"
-          >
-            {{ interval.label }}
-          </button>
-        </div>
       </div>
-      <div ref="chartRef" class="h-80"></div>
+      <div ref="chartRef" class="h-72"></div>
     </div>
 
-    <!-- 快速操作 -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <router-link to="/alerts" class="card hover:border-primary-500/50 transition-colors group">
-        <div class="flex items-center gap-4">
-          <div class="w-12 h-12 bg-primary-500/10 rounded-xl flex items-center justify-center group-hover:bg-primary-500/20 transition-colors">
-            <svg class="w-6 h-6 text-primary-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-            </svg>
+    <div v-if="recentAlerts.length > 0" class="card">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-medium text-white">需要关注的预警</h3>
+        <router-link to="/alerts" class="text-primary-400 text-sm hover:text-primary-300">
+          查看全部 →
+        </router-link>
+      </div>
+      <div class="space-y-3">
+        <div
+          v-for="alert in recentAlerts"
+          :key="alert.id"
+          class="p-3 rounded-lg border"
+          :class="{
+            'bg-red-500/5 border-red-500/20': alert.status === 'triggered',
+            'bg-yellow-500/5 border-yellow-500/20': alert.status === 'recovered'
+          }"
+        >
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-white font-medium">{{ alert.name }}</p>
+              <p class="text-dark-400 text-sm">
+                {{ alert.alert_type === 'above' ? '上涨至' : '下跌至' }}
+                <span class="font-mono">${{ formatPrice(alert.target_price) }}</span>
+              </p>
+            </div>
+            <span
+              class="px-2 py-0.5 rounded text-xs font-medium"
+              :class="{
+                'bg-red-500/10 text-red-400': alert.status === 'triggered',
+                'bg-yellow-500/10 text-yellow-400': alert.status === 'recovered'
+              }"
+            >
+              {{ alert.status === 'triggered' ? '已触发' : '已恢复' }}
+            </span>
           </div>
-          <div>
-            <p class="text-white font-medium group-hover:text-primary-400 transition-colors">创建预警</p>
-            <p class="text-dark-400 text-sm">设置价格预警，及时获取通知</p>
-          </div>
-          <svg class="w-5 h-5 text-dark-500 ml-auto group-hover:text-primary-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="9 18 15 12 9 6"/>
-          </svg>
         </div>
-      </router-link>
-      <router-link to="/history" class="card hover:border-green-500/50 transition-colors group">
-        <div class="flex items-center gap-4">
-          <div class="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center group-hover:bg-green-500/20 transition-colors">
-            <svg class="w-6 h-6 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-          </div>
-          <div>
-            <p class="text-white font-medium group-hover:text-green-400 transition-colors">触发历史</p>
-            <p class="text-dark-400 text-sm">查看预警触发记录</p>
-          </div>
-          <svg class="w-5 h-5 text-dark-500 ml-auto group-hover:text-green-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="9 18 15 12 9 6"/>
-          </svg>
-        </div>
-      </router-link>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import * as echarts from 'echarts'
 import api from '../api'
-import { useToastStore } from '../stores/toast'
-
-const toast = useToastStore()
+import { useWebSocket } from '../composables/useWebSocket'
 
 const priceData = ref({
   price: 0,
@@ -142,22 +186,35 @@ const priceData = ref({
   volume_24h: 0
 })
 
+const alerts = ref([])
 const chartRef = ref(null)
-const wsConnected = ref(false)
 let chart = null
-let ws = null
 let reconnectTimer = null
-let heartbeatTimer = null
 
-const intervals = [
-  { label: '1小时', value: '1h' },
-  { label: '4小时', value: '4h' },
-  { label: '1天', value: '1d' }
-]
-const selectedInterval = ref('1h')
+const { wsConnected, lastPrice, connect, disconnect, on, off } = useWebSocket()
+
+const alertStats = computed(() => {
+  const stats = { active: 0, triggered: 0, recovered: 0, cooldown: 0, pendingEvents: 0 }
+  alerts.value.forEach(a => {
+    if (a.status === 'active') stats.active++
+    if (a.status === 'triggered') stats.triggered++
+    if (a.status === 'recovered') {
+      stats.recovered++
+      stats.pendingEvents++
+    }
+    if (a.status === 'triggered') stats.pendingEvents++
+  })
+  return stats
+})
+
+const recentAlerts = computed(() => {
+  return alerts.value.filter(a =>
+    a.status === 'triggered' || a.status === 'recovered'
+  ).slice(0, 5)
+})
 
 function formatPrice(price) {
-  if (!price) return '0.00'
+  if (!price && price !== 0) return '0.00'
   return Number(price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
@@ -169,58 +226,6 @@ function formatVolume(volume) {
   return volume.toFixed(2)
 }
 
-function connectWebSocket() {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = `${protocol}//${window.location.host}/ws/price`
-  
-  ws = new WebSocket(wsUrl)
-  
-  ws.onopen = () => {
-    console.log('WebSocket connected')
-    wsConnected.value = true
-    
-    // 启动心跳
-    heartbeatTimer = setInterval(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send('ping')
-      }
-    }, 30000)
-  }
-  
-  ws.onmessage = (event) => {
-    try {
-      if (event.data === 'pong') return
-      
-      const message = JSON.parse(event.data)
-      
-      if (message.type === 'price_update' && message.data) {
-        priceData.value = message.data
-      } else if (message.type === 'alert_triggered' && message.data) {
-        // 显示预警通知
-        toast.warning(
-          `🔔 ${message.data.alert_name}`,
-          message.data.message || `当前价格: $${formatPrice(message.data.current_price)}`
-        )
-      }
-    } catch (e) {
-      console.error('Failed to parse WebSocket message:', e)
-    }
-  }
-  
-  ws.onclose = () => {
-    console.log('WebSocket disconnected')
-    wsConnected.value = false
-    clearInterval(heartbeatTimer)
-    
-    // 5秒后重连
-    reconnectTimer = setTimeout(connectWebSocket, 5000)
-  }
-  
-  ws.onerror = (error) => {
-    console.error('WebSocket error:', error)
-  }
-}
-
 async function fetchPrice() {
   try {
     const response = await api.get('/api/price/current')
@@ -230,10 +235,19 @@ async function fetchPrice() {
   }
 }
 
+async function fetchAlerts() {
+  try {
+    const response = await api.get('/api/alerts')
+    alerts.value = response.data
+  } catch (error) {
+    console.error('Failed to fetch alerts:', error)
+  }
+}
+
 async function fetchHistory() {
   try {
     const response = await api.get('/api/price/history', {
-      params: { interval: selectedInterval.value, limit: 100 }
+      params: { interval: '1h', limit: 100 }
     })
     updateChart(response.data.data)
   } catch (error) {
@@ -242,13 +256,13 @@ async function fetchHistory() {
 }
 
 function updateChart(data) {
-  if (!chart) return
+  if (!chart || !data || !data.length) return
 
   const dates = data.map(item => {
     const date = new Date(item.timestamp)
     return date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   })
-  
+
   const prices = data.map(item => [item.open, item.close, item.low, item.high])
   const volumes = data.map(item => item.volume)
 
@@ -261,15 +275,15 @@ function updateChart(data) {
       textStyle: { color: '#e2e3e5' }
     },
     grid: [
-      { left: '10%', right: '10%', top: '10%', height: '60%' },
-      { left: '10%', right: '10%', top: '75%', height: '15%' }
+      { left: '8%', right: '5%', top: '5%', height: '65%' },
+      { left: '8%', right: '5%', top: '78%', height: '15%' }
     ],
     xAxis: [
       {
         type: 'category',
         data: dates,
         axisLine: { lineStyle: { color: '#3f4145' } },
-        axisLabel: { color: '#a0a2a8' }
+        axisLabel: { color: '#a0a2a8', fontSize: 10 }
       },
       {
         type: 'category',
@@ -319,35 +333,38 @@ function updateChart(data) {
   })
 }
 
-watch(selectedInterval, () => {
-  fetchHistory()
-})
+function handlePriceUpdate(data) {
+  priceData.value = data
+}
+
+function handleAlertUpdate() {
+  fetchAlerts()
+}
 
 onMounted(() => {
-  // 先获取一次价格
   fetchPrice()
-  
-  // 连接WebSocket实时推送
-  connectWebSocket()
+  fetchAlerts()
+  connect()
 
   chart = echarts.init(chartRef.value)
   fetchHistory()
 
   window.addEventListener('resize', () => chart?.resize())
+
+  on('price_update', handlePriceUpdate)
+  on('alert_triggered', handleAlertUpdate)
+  on('alert_recovered', handleAlertUpdate)
+  on('alert_state_changed', handleAlertUpdate)
 })
 
 onUnmounted(() => {
-  // 清理WebSocket
-  if (ws) {
-    ws.close()
-  }
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-  }
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer)
-  }
-  
+  if (reconnectTimer) clearTimeout(reconnectTimer)
+
+  off('price_update', handlePriceUpdate)
+  off('alert_triggered', handleAlertUpdate)
+  off('alert_recovered', handleAlertUpdate)
+  off('alert_state_changed', handleAlertUpdate)
+
   chart?.dispose()
 })
 </script>

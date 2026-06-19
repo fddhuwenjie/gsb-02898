@@ -1,10 +1,9 @@
 <template>
   <div class="p-6 space-y-6">
-    <!-- 页面标题 -->
     <div class="flex items-center justify-between">
       <div>
-        <h1 class="text-2xl font-bold text-white">预警管理</h1>
-        <p class="text-dark-400 mt-1">设置价格预警，及时获取通知</p>
+        <h1 class="text-2xl font-bold text-white">预警规则</h1>
+        <p class="text-dark-400 mt-1">管理您的BTC价格预警规则</p>
       </div>
       <button @click="showModal = true" class="btn btn-primary flex items-center gap-2">
         <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -15,7 +14,6 @@
       </button>
     </div>
 
-    <!-- 当前价格提示 -->
     <div class="card bg-gradient-to-r from-primary-500/10 to-transparent border-primary-500/20">
       <div class="flex items-center gap-4">
         <div class="w-12 h-12 bg-primary-500/20 rounded-xl flex items-center justify-center">
@@ -27,110 +25,165 @@
           <p class="text-dark-400 text-sm">BTC 当前价格</p>
           <p class="text-2xl font-bold text-white">${{ formatPrice(currentPrice) }}</p>
         </div>
+        <div class="ml-auto flex items-center gap-2 text-sm">
+          <span
+            class="w-2 h-2 rounded-full"
+            :class="wsConnected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'"
+          ></span>
+          <span :class="wsConnected ? 'text-green-400' : 'text-yellow-400'">
+            {{ wsConnected ? '实时同步中' : '连接中...' }}
+          </span>
+        </div>
       </div>
     </div>
 
-    <!-- 预警列表 -->
+    <div class="flex gap-2 flex-wrap">
+      <button
+        v-for="stat in statusStats"
+        :key="stat.value"
+        @click="filterStatus = filterStatus === stat.value ? null : stat.value"
+        class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+        :class="filterStatus === stat.value
+          ? 'bg-primary-500 text-white'
+          : 'bg-dark-800 text-dark-300 hover:bg-dark-700'"
+      >
+        {{ stat.label }}
+        <span class="ml-1 opacity-70">({{ stat.count }})</span>
+      </button>
+    </div>
+
     <div class="card">
-      <h3 class="text-lg font-medium text-white mb-4">我的预警</h3>
-      
+      <h3 class="text-lg font-medium text-white mb-4">我的预警规则</h3>
+
       <div v-if="loading" class="text-center py-8 text-dark-400">
         加载中...
       </div>
-      
-      <div v-else-if="alerts.length === 0" class="text-center py-12">
+
+      <div v-else-if="filteredAlerts.length === 0" class="text-center py-12">
         <div class="w-16 h-16 bg-dark-800 rounded-full flex items-center justify-center mx-auto mb-4">
           <svg class="w-8 h-8 text-dark-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
             <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
           </svg>
         </div>
-        <p class="text-dark-400">暂无预警</p>
+        <p class="text-dark-400">{{ filterStatus ? '该状态下暂无预警' : '暂无预警规则' }}</p>
         <p class="text-dark-500 text-sm mt-1">点击上方按钮创建第一个预警</p>
       </div>
 
-      <div v-else class="overflow-x-auto">
-        <table class="table">
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>类型</th>
-              <th>目标价格</th>
-              <th>状态</th>
-              <th>重复触发</th>
-              <th>创建时间</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="alert in alerts" :key="alert.id">
-              <td class="font-medium text-white">{{ alert.name }}</td>
-              <td>
+      <div v-else class="space-y-4">
+        <div
+          v-for="alert in filteredAlerts"
+          :key="alert.id"
+          class="p-4 bg-dark-900 rounded-xl border transition-colors"
+          :class="{
+            'border-red-500/30': alert.status === 'triggered',
+            'border-yellow-500/30': alert.status === 'recovered' || alert.status === 'cooldown',
+            'border-dark-700': alert.status === 'active',
+            'border-dark-800': alert.status === 'disabled'
+          }"
+        >
+          <div class="flex items-start justify-between gap-4">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-3 mb-2">
+                <h4 class="text-white font-semibold text-lg truncate">{{ alert.name }}</h4>
                 <span
-                  class="px-2 py-1 rounded text-xs font-medium"
-                  :class="alert.alert_type === 'above' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'"
-                >
-                  {{ alert.alert_type === 'above' ? '价格上涨' : '价格下跌' }}
-                </span>
-              </td>
-              <td class="font-mono">${{ formatPrice(alert.target_price) }}</td>
-              <td>
-                <span
-                  class="px-2 py-1 rounded text-xs font-medium"
-                  :class="{
-                    'bg-green-500/10 text-green-400': alert.status === 'active',
-                    'bg-yellow-500/10 text-yellow-400': alert.status === 'triggered',
-                    'bg-dark-600 text-dark-400': alert.status === 'disabled'
-                  }"
+                  class="px-2 py-0.5 rounded text-xs font-medium shrink-0"
+                  :class="statusClass(alert.status)"
                 >
                   {{ statusMap[alert.status] }}
                 </span>
-              </td>
-              <td>
-                <span :class="alert.is_repeat ? 'text-green-400' : 'text-dark-500'">
-                  {{ alert.is_repeat ? '是' : '否' }}
+              </div>
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                <span class="flex items-center gap-1">
+                  <span
+                    class="px-1.5 py-0.5 rounded text-xs font-medium"
+                    :class="alert.alert_type === 'above' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'"
+                  >
+                    {{ alert.alert_type === 'above' ? '价格上涨' : '价格下跌' }}
+                  </span>
                 </span>
-              </td>
-              <td class="text-dark-400 text-sm">{{ formatDate(alert.created_at) }}</td>
-              <td>
-                <div class="flex items-center gap-2">
-                  <button
-                    @click="toggleStatus(alert)"
-                    class="p-2 hover:bg-dark-700 rounded-lg transition-colors"
-                    :title="alert.status === 'active' ? '禁用' : '启用'"
-                  >
-                    <svg v-if="alert.status === 'active'" class="w-4 h-4 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <circle cx="12" cy="12" r="10"/>
-                      <line x1="10" y1="15" x2="10" y2="9"/>
-                      <line x1="14" y1="15" x2="14" y2="9"/>
-                    </svg>
-                    <svg v-else class="w-4 h-4 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polygon points="5 3 19 12 5 21 5 3"/>
-                    </svg>
-                  </button>
-                  <button
-                    @click="confirmDelete(alert.id)"
-                    class="p-2 hover:bg-dark-700 rounded-lg transition-colors text-red-400"
-                    title="删除"
-                  >
-                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <polyline points="3 6 5 6 21 6"/>
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                  </button>
+                <span class="text-dark-400">
+                  目标价: <span class="text-primary-400 font-mono">${{ formatPrice(alert.target_price) }}</span>
+                </span>
+                <span class="text-dark-500">
+                  冷却: {{ alert.cooldown_seconds }}秒
+                </span>
+                <span class="text-dark-500">
+                  {{ alert.is_repeat ? '可重复触发' : '单次触发' }}
+                </span>
+              </div>
+
+              <div v-if="alert.active_event" class="mt-3 p-3 bg-dark-800/50 rounded-lg">
+                <div class="text-sm space-y-1">
+                  <div v-if="alert.active_event.triggered_price" class="text-dark-300">
+                    触发价格: <span class="text-red-400 font-mono">${{ formatPrice(alert.active_event.triggered_price) }}</span>
+                    <span class="text-dark-500 ml-2">{{ formatDate(alert.active_event.triggered_at) }}</span>
+                  </div>
+                  <div v-if="alert.active_event.recovered_price" class="text-dark-300">
+                    恢复价格: <span class="text-green-400 font-mono">${{ formatPrice(alert.active_event.recovered_price) }}</span>
+                    <span class="text-dark-500 ml-2">{{ formatDate(alert.active_event.recovered_at) }}</span>
+                  </div>
+                  <div class="text-dark-400 text-xs mt-1">{{ alert.active_event.message }}</div>
                 </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                <button
+                  @click="handleAckFromAlert(alert.active_event)"
+                  class="mt-2 px-3 py-1 text-xs bg-primary-500/20 text-primary-400 rounded hover:bg-primary-500/30 transition-colors"
+                >
+                  确认事件
+                </button>
+              </div>
+
+              <div v-else-if="alert.last_triggered_at" class="mt-2 text-xs text-dark-500">
+                上次触发: ${{ formatPrice(alert.last_triggered_price) }} · {{ formatDate(alert.last_triggered_at) }}
+              </div>
+            </div>
+
+            <div class="flex items-center gap-1 shrink-0">
+              <button
+                v-if="alert.status !== 'active' && alert.status !== 'disabled'"
+                @click="resetAlert(alert)"
+                class="p-2 hover:bg-dark-700 rounded-lg transition-colors text-blue-400"
+                title="重置为活跃"
+              >
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="23 4 23 10 17 10"/>
+                  <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                </svg>
+              </button>
+              <button
+                @click="toggleStatus(alert)"
+                class="p-2 hover:bg-dark-700 rounded-lg transition-colors"
+                :title="alert.status === 'disabled' ? '启用' : '禁用'"
+              >
+                <svg v-if="alert.status === 'disabled'" class="w-4 h-4 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                <svg v-else class="w-4 h-4 text-yellow-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="10" y1="15" x2="10" y2="9"/>
+                  <line x1="14" y1="15" x2="14" y2="9"/>
+                </svg>
+              </button>
+              <button
+                @click="confirmDelete(alert.id)"
+                class="p-2 hover:bg-dark-700 rounded-lg transition-colors text-red-400"
+                title="删除"
+              >
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- 创建预警弹窗 -->
     <div v-if="showModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div class="card w-full max-w-md">
         <div class="flex items-center justify-between mb-6">
-          <h3 class="text-lg font-medium text-white">创建预警</h3>
+          <h3 class="text-lg font-medium text-white">创建预警规则</h3>
           <button @click="closeModal" class="p-2 hover:bg-dark-700 rounded-lg transition-colors">
             <svg class="w-5 h-5 text-dark-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="18" y1="6" x2="6" y2="18"/>
@@ -142,13 +195,13 @@
         <form @submit.prevent="createAlert" class="space-y-4">
           <div>
             <label class="block text-sm text-dark-300 mb-2">预警名称</label>
-            <input 
-              v-model="form.name" 
+            <input
+              v-model="form.name"
               @blur="validateName"
-              type="text" 
-              class="input" 
+              type="text"
+              class="input"
               :class="{ 'border-red-500 focus:border-red-500': errors.name }"
-              placeholder="例如：BTC突破10万" 
+              placeholder="例如：BTC突破10万美元"
             />
             <p v-if="errors.name" class="text-red-400 text-xs mt-1">{{ errors.name }}</p>
           </div>
@@ -187,23 +240,36 @@
 
           <div>
             <label class="block text-sm text-dark-300 mb-2">目标价格 (USD)</label>
-            <input 
-              v-model.number="form.target_price" 
+            <input
+              v-model.number="form.target_price"
               @blur="validatePrice"
-              type="number" 
-              step="0.01" 
+              type="number"
+              step="0.01"
               min="0"
-              class="input" 
+              class="input"
               :class="{ 'border-red-500 focus:border-red-500': errors.target_price }"
-              placeholder="输入目标价格" 
+              placeholder="输入目标价格"
             />
             <p v-if="errors.target_price" class="text-red-400 text-xs mt-1">{{ errors.target_price }}</p>
             <p v-else class="text-dark-500 text-xs mt-1">当前价格: ${{ formatPrice(currentPrice) }}</p>
           </div>
 
+          <div>
+            <label class="block text-sm text-dark-300 mb-2">冷却时间 (秒)</label>
+            <input
+              v-model.number="form.cooldown_seconds"
+              type="number"
+              min="10"
+              max="3600"
+              step="10"
+              class="input"
+            />
+            <p class="text-dark-500 text-xs mt-1">触发后在此时间内不会重复触发</p>
+          </div>
+
           <div class="flex items-center gap-3">
             <input v-model="form.is_repeat" type="checkbox" id="is_repeat" class="w-4 h-4 rounded border-dark-600 bg-dark-800 text-primary-500 focus:ring-primary-500" />
-            <label for="is_repeat" class="text-sm text-dark-300">重复触发（触发后不自动禁用）</label>
+            <label for="is_repeat" class="text-sm text-dark-300">可重复触发（恢复后再次满足条件将再次触发）</label>
           </div>
 
           <div class="flex gap-3 pt-4">
@@ -216,7 +282,6 @@
       </div>
     </div>
 
-    <!-- 删除确认弹窗 -->
     <Transition name="modal">
       <div v-if="showDeleteConfirm" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
         <div class="card w-full max-w-sm text-center">
@@ -228,7 +293,7 @@
             </svg>
           </div>
           <h3 class="text-xl font-semibold text-white mb-2">确认删除</h3>
-          <p class="text-dark-400 mb-6">删除后将无法恢复，确定要删除这个预警吗？</p>
+          <p class="text-dark-400 mb-6">删除后将无法恢复，确定要删除这个预警规则吗？相关历史事件将保留。</p>
           <div class="flex gap-3">
             <button @click="showDeleteConfirm = false" class="btn btn-secondary flex-1">取消</button>
             <button @click="deleteAlert" class="btn btn-danger flex-1">确认删除</button>
@@ -240,12 +305,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, onUnmounted } from 'vue'
 import dayjs from 'dayjs'
 import api from '../api'
 import { useToastStore } from '../stores/toast'
+import { useWebSocket } from '../composables/useWebSocket'
 
 const toast = useToastStore()
+const { wsConnected, lastPrice, connect, disconnect, on, off } = useWebSocket()
+
 const alerts = ref([])
 const loading = ref(true)
 const showModal = ref(false)
@@ -253,10 +321,13 @@ const submitting = ref(false)
 const currentPrice = ref(0)
 const showDeleteConfirm = ref(false)
 const deleteTargetId = ref(null)
+const filterStatus = ref(null)
 
 const statusMap = {
-  active: '活跃',
+  active: '监控中',
+  cooldown: '冷却中',
   triggered: '已触发',
+  recovered: '已恢复',
   disabled: '已禁用'
 }
 
@@ -264,7 +335,8 @@ const form = reactive({
   name: '',
   alert_type: 'above',
   target_price: null,
-  is_repeat: false
+  cooldown_seconds: 60,
+  is_repeat: true
 })
 
 const errors = reactive({
@@ -272,14 +344,46 @@ const errors = reactive({
   target_price: ''
 })
 
-// 表单校验
 const isFormValid = computed(() => {
-  return form.name.trim().length > 0 && 
-         form.target_price !== null && 
+  return form.name.trim().length > 0 &&
+         form.target_price !== null &&
          form.target_price > 0 &&
+         form.cooldown_seconds >= 10 &&
          !errors.name &&
          !errors.target_price
 })
+
+const statusStats = computed(() => {
+  const stats = {
+    active: 0, cooldown: 0, triggered: 0, recovered: 0, disabled: 0
+  }
+  alerts.value.forEach(a => {
+    if (stats[a.status] !== undefined) stats[a.status]++
+  })
+  return [
+    { label: '监控中', value: 'active', count: stats.active },
+    { label: '已触发', value: 'triggered', count: stats.triggered },
+    { label: '已恢复', value: 'recovered', count: stats.recovered },
+    { label: '冷却中', value: 'cooldown', count: stats.cooldown },
+    { label: '已禁用', value: 'disabled', count: stats.disabled }
+  ]
+})
+
+const filteredAlerts = computed(() => {
+  if (!filterStatus.value) return alerts.value
+  return alerts.value.filter(a => a.status === filterStatus.value)
+})
+
+function statusClass(status) {
+  const map = {
+    active: 'bg-green-500/10 text-green-400',
+    cooldown: 'bg-blue-500/10 text-blue-400',
+    triggered: 'bg-red-500/10 text-red-400',
+    recovered: 'bg-yellow-500/10 text-yellow-400',
+    disabled: 'bg-dark-600 text-dark-400'
+  }
+  return map[status] || map.disabled
+}
 
 function validateName() {
   if (!form.name.trim()) {
@@ -306,19 +410,21 @@ function validatePrice() {
 }
 
 function formatPrice(price) {
-  if (!price) return '0.00'
+  if (!price && price !== 0) return '0.00'
   return Number(price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function formatDate(date) {
-  return dayjs(date).format('YYYY-MM-DD HH:mm')
+  if (!date) return ''
+  return dayjs(date).format('YYYY-MM-DD HH:mm:ss')
 }
 
 function resetForm() {
   form.name = ''
   form.alert_type = 'above'
   form.target_price = null
-  form.is_repeat = false
+  form.cooldown_seconds = 60
+  form.is_repeat = true
   errors.name = ''
   errors.target_price = ''
 }
@@ -344,26 +450,26 @@ async function fetchPrice() {
 }
 
 async function createAlert() {
-  // 先校验
   validateName()
   validatePrice()
-  
+
   if (!isFormValid.value) {
     toast.warning('表单校验失败', '请检查输入内容')
     return
   }
-  
+
   submitting.value = true
   try {
     await api.post('/api/alerts', {
       name: form.name.trim(),
       alert_type: form.alert_type,
       target_price: Number(form.target_price),
+      cooldown_seconds: Number(form.cooldown_seconds),
       is_repeat: form.is_repeat
     })
     showModal.value = false
     resetForm()
-    toast.success('创建成功', '预警已成功创建')
+    toast.success('创建成功', '预警规则已创建')
     await fetchAlerts()
   } catch (error) {
     toast.error('创建失败', error.response?.data?.detail || '请检查输入后重试')
@@ -373,13 +479,33 @@ async function createAlert() {
 }
 
 async function toggleStatus(alertItem) {
-  const newStatus = alertItem.status === 'active' ? 'disabled' : 'active'
+  const newStatus = alertItem.status === 'disabled' ? 'active' : 'disabled'
   try {
     await api.put(`/api/alerts/${alertItem.id}`, { status: newStatus })
     toast.success('状态已更新', newStatus === 'active' ? '预警已启用' : '预警已禁用')
     await fetchAlerts()
   } catch (error) {
     toast.error('更新失败', error.response?.data?.detail || '请稍后重试')
+  }
+}
+
+async function resetAlert(alertItem) {
+  try {
+    await api.post(`/api/alerts/${alertItem.id}/reset`)
+    toast.success('已重置', '预警规则已重置为监控状态')
+    await fetchAlerts()
+  } catch (error) {
+    toast.error('重置失败', error.response?.data?.detail || '请稍后重试')
+  }
+}
+
+async function handleAckFromAlert(event) {
+  try {
+    await api.post(`/api/alerts/events/${event.id}/acknowledge`)
+    toast.success('已确认', '事件已确认')
+    await fetchAlerts()
+  } catch (error) {
+    toast.error('确认失败', error.response?.data?.detail || '请稍后重试')
   }
 }
 
@@ -406,8 +532,28 @@ function closeModal() {
   resetForm()
 }
 
+function handlePriceUpdate(data) {
+  currentPrice.value = data.price
+}
+
+function handleStateChange() {
+  fetchAlerts()
+}
+
 onMounted(() => {
   fetchAlerts()
   fetchPrice()
+  connect()
+  on('price_update', handlePriceUpdate)
+  on('alert_state_changed', handleStateChange)
+  on('alert_triggered', handleStateChange)
+  on('alert_recovered', handleStateChange)
+})
+
+onUnmounted(() => {
+  off('price_update', handlePriceUpdate)
+  off('alert_state_changed', handleStateChange)
+  off('alert_triggered', handleStateChange)
+  off('alert_recovered', handleStateChange)
 })
 </script>
