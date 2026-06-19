@@ -150,7 +150,7 @@ async def health_check():
         "service": settings.APP_NAME,
         "redis": redis_status,
         "scheduler": scheduler_status,
-        "websocket_clients": len(monitor_service.websocket_clients)
+        "websocket_clients": monitor_service.total_clients
     }
 
 

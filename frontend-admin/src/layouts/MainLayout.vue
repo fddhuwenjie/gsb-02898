@@ -99,7 +99,7 @@ const menuItems = computed(() => {
   const items = [
     { path: '/', name: '仪表盘', icon: DashboardIcon },
     { path: '/alerts', name: '预警管理', icon: AlertIcon },
-    { path: '/history', name: '触发历史', icon: HistoryIcon }
+    { path: '/history', name: '预警事件', icon: HistoryIcon }
   ]
   
   if (authStore.isAdmin) {

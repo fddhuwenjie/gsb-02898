@@ -6,8 +6,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 创建异步引擎
+def _normalize_db_url(url: str) -> str:
+    """确保 SQLite URL 使用 aiosqlite 驱动，兼容 sqlite:/// 与 sqlite+aiosqlite:///"""
+    if url.startswith("sqlite+aiosqlite:///"):
+        return url
+    if url.startswith("sqlite:///"):
+        return "sqlite+aiosqlite:///" + url[len("sqlite:///"):]
+    return url
+
+
 engine = create_async_engine(
-    settings.DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///"),
+    _normalize_db_url(settings.DATABASE_URL),
     echo=settings.DEBUG,
     future=True
 )
