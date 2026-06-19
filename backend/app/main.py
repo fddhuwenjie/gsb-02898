@@ -144,13 +144,14 @@ async def health_check():
     """健康检查"""
     redis_status = "connected" if redis_client.client else "disconnected"
     scheduler_status = "running" if scheduler.running else "stopped"
-    
+    ws_count = sum(len(clients) for clients in monitor_service._clients.values())
+
     return {
         "status": "healthy",
         "service": settings.APP_NAME,
         "redis": redis_status,
         "scheduler": scheduler_status,
-        "websocket_clients": len(monitor_service.websocket_clients)
+        "websocket_clients": ws_count
     }
 
 
