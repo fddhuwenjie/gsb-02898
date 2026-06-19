@@ -1,36 +1,55 @@
 <template>
   <div class="p-6 space-y-6">
-    <!-- 页面标题 -->
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-bold text-white">仪表盘</h1>
-        <p class="text-dark-400 mt-1">实时监控BTC行情数据</p>
+        <p class="text-dark-400 mt-1">实时监控BTC行情与预警状态</p>
       </div>
       <div class="flex items-center gap-2 text-sm">
-        <span 
-          class="w-2 h-2 rounded-full"
-          :class="wsConnected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'"
-        ></span>
-        <span :class="wsConnected ? 'text-green-400' : 'text-yellow-400'">
-          {{ wsConnected ? '实时连接中' : '连接中...' }}
+        <span class="w-2 h-2 rounded-full" :class="wsStore.connected ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'"></span>
+        <span :class="wsStore.connected ? 'text-green-400' : 'text-yellow-400'">
+          {{ wsStore.connected ? '实时连接中' : '连接中...' }}
         </span>
       </div>
     </div>
 
-    <!-- 价格概览卡片 -->
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div class="card !p-4">
+        <p class="text-dark-400 text-xs mb-1">当前价格</p>
+        <p class="text-lg font-bold text-white">${{ formatPrice(priceData.price) }}</p>
+      </div>
+      <div class="card !p-4">
+        <p class="text-dark-400 text-xs mb-1">监控中规则</p>
+        <p class="text-lg font-bold text-green-400">{{ wsStore.stats.active_rules }}</p>
+      </div>
+      <div class="card !p-4">
+        <p class="text-dark-400 text-xs mb-1">已触发未恢复</p>
+        <p class="text-lg font-bold text-red-400">{{ wsStore.stats.open_triggered }}</p>
+      </div>
+      <div class="card !p-4">
+        <p class="text-dark-400 text-xs mb-1">待确认事件</p>
+        <p class="text-lg font-bold text-yellow-400">{{ wsStore.stats.recovered_pending }}</p>
+      </div>
+      <div class="card !p-4">
+        <p class="text-dark-400 text-xs mb-1">冷却中规则</p>
+        <p class="text-lg font-bold text-blue-400">{{ wsStore.stats.cooldown_rules }}</p>
+      </div>
+      <div class="card !p-4">
+        <p class="text-dark-400 text-xs mb-1">历史总事件</p>
+        <p class="text-lg font-bold text-dark-300">{{ wsStore.stats.total_events }}</p>
+      </div>
+    </div>
+
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-      <!-- 当前价格 - 大卡片 -->
       <div class="card lg:col-span-2 bg-gradient-to-br from-dark-800 to-dark-900">
         <div class="flex items-center justify-between">
           <div>
             <p class="text-dark-400 text-sm">BTC/USDT</p>
             <div class="flex items-baseline gap-3 mt-1">
               <span class="text-3xl font-bold text-white">${{ formatPrice(priceData.price) }}</span>
-              <span
-                class="text-base font-medium px-2 py-0.5 rounded"
-                :class="priceData.price_change_percentage_24h >= 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'"
-              >
-                {{ priceData.price_change_percentage_24h >= 0 ? '+' : '' }}{{ priceData.price_change_percentage_24h?.toFixed(2) }}%
+              <span class="text-base font-medium px-2 py-0.5 rounded"
+                :class="priceChange >= 0 ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'">
+                {{ priceChange >= 0 ? '+' : '' }}{{ priceChange?.toFixed(2) }}%
               </span>
             </div>
           </div>
@@ -41,29 +60,22 @@
           </div>
         </div>
       </div>
-
-      <!-- 24h 最高 -->
       <div class="card">
         <p class="text-dark-400 text-xs mb-1">24h 最高</p>
         <p class="text-xl font-semibold text-white">${{ formatPrice(priceData.high_24h) }}</p>
       </div>
-
-      <!-- 24h 最低 -->
       <div class="card">
         <p class="text-dark-400 text-xs mb-1">24h 最低</p>
         <p class="text-xl font-semibold text-white">${{ formatPrice(priceData.low_24h) }}</p>
       </div>
-
-      <!-- 24h 涨跌额 -->
       <div class="card">
         <p class="text-dark-400 text-xs mb-1">24h 涨跌</p>
-        <p class="text-xl font-semibold" :class="priceData.price_change_24h >= 0 ? 'text-green-400' : 'text-red-400'">
-          {{ priceData.price_change_24h >= 0 ? '+' : '' }}${{ formatPrice(Math.abs(priceData.price_change_24h)) }}
+        <p class="text-xl font-semibold" :class="priceChangeAmount >= 0 ? 'text-green-400' : 'text-red-400'">
+          {{ priceChangeAmount >= 0 ? '+' : '' }}${{ formatPrice(Math.abs(priceChangeAmount)) }}
         </p>
       </div>
     </div>
 
-    <!-- K线图 -->
     <div class="card">
       <div class="flex items-center justify-between mb-4">
         <div class="flex items-center gap-4">
@@ -71,13 +83,10 @@
           <span class="text-dark-500 text-sm">成交量: {{ formatVolume(priceData.volume_24h) }}</span>
         </div>
         <div class="flex gap-1 bg-dark-900 p-1 rounded-lg">
-          <button
-            v-for="interval in intervals"
-            :key="interval.value"
+          <button v-for="interval in intervals" :key="interval.value"
             @click="selectedInterval = interval.value"
             class="px-3 py-1.5 text-sm rounded-md transition-colors"
-            :class="selectedInterval === interval.value ? 'bg-primary-500 text-white' : 'text-dark-400 hover:text-white'"
-          >
+            :class="selectedInterval === interval.value ? 'bg-primary-500 text-white' : 'text-dark-400 hover:text-white'">
             {{ interval.label }}
           </button>
         </div>
@@ -85,8 +94,33 @@
       <div ref="chartRef" class="h-80"></div>
     </div>
 
-    <!-- 快速操作 -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div v-if="wsStore.openEvents.length > 0" class="card border-red-500/30 bg-red-500/5">
+      <h3 class="text-lg font-medium text-white mb-3 flex items-center gap-2">
+        <span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+        待处理事件 ({{ wsStore.openEvents.length }})
+      </h3>
+      <div class="space-y-2 max-h-64 overflow-y-auto">
+        <div v-for="evt in wsStore.openEvents.slice(0, 5)" :key="evt.id"
+          class="flex items-center justify-between p-3 bg-dark-900/50 rounded-lg">
+          <div>
+            <p class="text-white text-sm font-medium">{{ evt.alert_name || '未知预警' }}</p>
+            <p class="text-dark-400 text-xs mt-0.5">{{ evt.message }}</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="px-2 py-1 rounded text-xs" :class="wsStore.getEventDisplayStatus(evt).color">
+              {{ wsStore.getEventDisplayStatus(evt).label }}
+            </span>
+            <button v-if="evt.status === 'recovered'" @click="acknowledgeEvent(evt.id)"
+              class="px-3 py-1 text-xs bg-primary-500 hover:bg-primary-600 text-white rounded-lg transition-colors">
+              确认
+            </button>
+          </div>
+        </div>
+      </div>
+      <router-link to="/events" class="block text-center text-primary-400 text-sm mt-3 hover:text-primary-300">查看全部事件 →</router-link>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       <router-link to="/alerts" class="card hover:border-primary-500/50 transition-colors group">
         <div class="flex items-center gap-4">
           <div class="w-12 h-12 bg-primary-500/10 rounded-xl flex items-center justify-center group-hover:bg-primary-500/20 transition-colors">
@@ -96,29 +130,37 @@
             </svg>
           </div>
           <div>
-            <p class="text-white font-medium group-hover:text-primary-400 transition-colors">创建预警</p>
-            <p class="text-dark-400 text-sm">设置价格预警，及时获取通知</p>
+            <p class="text-white font-medium group-hover:text-primary-400 transition-colors">预警管理</p>
+            <p class="text-dark-400 text-sm">管理价格预警规则</p>
           </div>
-          <svg class="w-5 h-5 text-dark-500 ml-auto group-hover:text-primary-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="9 18 15 12 9 6"/>
-          </svg>
         </div>
       </router-link>
-      <router-link to="/history" class="card hover:border-green-500/50 transition-colors group">
+      <router-link to="/events" class="card hover:border-yellow-500/50 transition-colors group">
         <div class="flex items-center gap-4">
-          <div class="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center group-hover:bg-green-500/20 transition-colors">
-            <svg class="w-6 h-6 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <div class="w-12 h-12 bg-yellow-500/10 rounded-xl flex items-center justify-center group-hover:bg-yellow-500/20 transition-colors">
+            <svg class="w-6 h-6 text-yellow-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10"/>
               <polyline points="12 6 12 12 16 14"/>
             </svg>
           </div>
           <div>
-            <p class="text-white font-medium group-hover:text-green-400 transition-colors">触发历史</p>
-            <p class="text-dark-400 text-sm">查看预警触发记录</p>
+            <p class="text-white font-medium group-hover:text-yellow-400 transition-colors">事件中心</p>
+            <p class="text-dark-400 text-sm">查看和确认预警事件</p>
           </div>
-          <svg class="w-5 h-5 text-dark-500 ml-auto group-hover:text-green-400 transition-colors" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="9 18 15 12 9 6"/>
-          </svg>
+        </div>
+      </router-link>
+      <router-link v-if="authStore.isAdmin" to="/users" class="card hover:border-green-500/50 transition-colors group">
+        <div class="flex items-center gap-4">
+          <div class="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center group-hover:bg-green-500/20 transition-colors">
+            <svg class="w-6 h-6 text-green-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+            </svg>
+          </div>
+          <div>
+            <p class="text-white font-medium group-hover:text-green-400 transition-colors">用户管理</p>
+            <p class="text-dark-400 text-sm">管理系统用户</p>
+          </div>
         </div>
       </router-link>
     </div>
@@ -126,28 +168,24 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import * as echarts from 'echarts'
 import api from '../api'
+import { useAuthStore } from '../stores/auth'
+import { useWsStore } from '../stores/ws'
 import { useToastStore } from '../stores/toast'
 
+const authStore = useAuthStore()
+const wsStore = useWsStore()
 const toast = useToastStore()
 
-const priceData = ref({
-  price: 0,
-  price_change_24h: 0,
-  price_change_percentage_24h: 0,
-  high_24h: 0,
-  low_24h: 0,
-  volume_24h: 0
-})
-
+const priceData = ref({ price: 0, price_change_24h: 0, price_change_percentage_24h: 0, high_24h: 0, low_24h: 0, volume_24h: 0 })
 const chartRef = ref(null)
-const wsConnected = ref(false)
 let chart = null
-let ws = null
-let reconnectTimer = null
-let heartbeatTimer = null
+let wsUnsub = null
+
+const priceChange = computed(() => priceData.value.price_change_percentage_24h ?? 0)
+const priceChangeAmount = computed(() => priceData.value.price_change_24h ?? 0)
 
 const intervals = [
   { label: '1小时', value: '1h' },
@@ -160,7 +198,6 @@ function formatPrice(price) {
   if (!price) return '0.00'
   return Number(price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
-
 function formatVolume(volume) {
   if (!volume) return '0'
   if (volume >= 1e9) return (volume / 1e9).toFixed(2) + 'B'
@@ -169,55 +206,12 @@ function formatVolume(volume) {
   return volume.toFixed(2)
 }
 
-function connectWebSocket() {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = `${protocol}//${window.location.host}/ws/price`
-  
-  ws = new WebSocket(wsUrl)
-  
-  ws.onopen = () => {
-    console.log('WebSocket connected')
-    wsConnected.value = true
-    
-    // 启动心跳
-    heartbeatTimer = setInterval(() => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send('ping')
-      }
-    }, 30000)
-  }
-  
-  ws.onmessage = (event) => {
-    try {
-      if (event.data === 'pong') return
-      
-      const message = JSON.parse(event.data)
-      
-      if (message.type === 'price_update' && message.data) {
-        priceData.value = message.data
-      } else if (message.type === 'alert_triggered' && message.data) {
-        // 显示预警通知
-        toast.warning(
-          `🔔 ${message.data.alert_name}`,
-          message.data.message || `当前价格: $${formatPrice(message.data.current_price)}`
-        )
-      }
-    } catch (e) {
-      console.error('Failed to parse WebSocket message:', e)
-    }
-  }
-  
-  ws.onclose = () => {
-    console.log('WebSocket disconnected')
-    wsConnected.value = false
-    clearInterval(heartbeatTimer)
-    
-    // 5秒后重连
-    reconnectTimer = setTimeout(connectWebSocket, 5000)
-  }
-  
-  ws.onerror = (error) => {
-    console.error('WebSocket error:', error)
+async function acknowledgeEvent(id) {
+  try {
+    await api.post(`/api/alerts/events/${id}/acknowledge`)
+    toast.success('已确认', '事件已标记为已处理')
+  } catch (e) {
+    toast.error('操作失败', e.response?.data?.detail || '请稍后重试')
   }
 }
 
@@ -225,129 +219,58 @@ async function fetchPrice() {
   try {
     const response = await api.get('/api/price/current')
     priceData.value = response.data
-  } catch (error) {
-    console.error('Failed to fetch price:', error)
-  }
+  } catch (e) { console.error(e) }
 }
 
 async function fetchHistory() {
   try {
-    const response = await api.get('/api/price/history', {
-      params: { interval: selectedInterval.value, limit: 100 }
-    })
+    const response = await api.get('/api/price/history', { params: { interval: selectedInterval.value, limit: 100 } })
     updateChart(response.data.data)
-  } catch (error) {
-    console.error('Failed to fetch history:', error)
-  }
+  } catch (e) { console.error(e) }
 }
 
 function updateChart(data) {
-  if (!chart) return
-
+  if (!chart || !data) return
   const dates = data.map(item => {
-    const date = new Date(item.timestamp)
-    return date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    const d = new Date(item.timestamp)
+    return d.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   })
-  
   const prices = data.map(item => [item.open, item.close, item.low, item.high])
   const volumes = data.map(item => item.volume)
-
   chart.setOption({
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'cross' },
-      backgroundColor: '#1a1b1e',
-      borderColor: '#3f4145',
-      textStyle: { color: '#e2e3e5' }
-    },
-    grid: [
-      { left: '10%', right: '10%', top: '10%', height: '60%' },
-      { left: '10%', right: '10%', top: '75%', height: '15%' }
-    ],
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, backgroundColor: '#1a1b1e', borderColor: '#3f4145', textStyle: { color: '#e2e3e5' } },
+    grid: [{ left: '10%', right: '10%', top: '10%', height: '60%' }, { left: '10%', right: '10%', top: '75%', height: '15%' }],
     xAxis: [
-      {
-        type: 'category',
-        data: dates,
-        axisLine: { lineStyle: { color: '#3f4145' } },
-        axisLabel: { color: '#a0a2a8' }
-      },
-      {
-        type: 'category',
-        gridIndex: 1,
-        data: dates,
-        axisLine: { lineStyle: { color: '#3f4145' } },
-        axisLabel: { show: false }
-      }
+      { type: 'category', data: dates, axisLine: { lineStyle: { color: '#3f4145' } }, axisLabel: { color: '#a0a2a8' } },
+      { type: 'category', gridIndex: 1, data: dates, axisLine: { lineStyle: { color: '#3f4145' } }, axisLabel: { show: false } }
     ],
     yAxis: [
-      {
-        scale: true,
-        splitLine: { lineStyle: { color: '#3f4145', type: 'dashed' } },
-        axisLine: { lineStyle: { color: '#3f4145' } },
-        axisLabel: { color: '#a0a2a8' }
-      },
-      {
-        scale: true,
-        gridIndex: 1,
-        splitNumber: 2,
-        axisLabel: { show: false },
-        axisLine: { show: false },
-        splitLine: { show: false }
-      }
+      { scale: true, splitLine: { lineStyle: { color: '#3f4145', type: 'dashed' } }, axisLine: { lineStyle: { color: '#3f4145' } }, axisLabel: { color: '#a0a2a8' } },
+      { scale: true, gridIndex: 1, splitNumber: 2, axisLabel: { show: false }, axisLine: { show: false }, splitLine: { show: false } }
     ],
     series: [
-      {
-        name: 'K线',
-        type: 'candlestick',
-        data: prices,
-        itemStyle: {
-          color: '#10b981',
-          color0: '#ef4444',
-          borderColor: '#10b981',
-          borderColor0: '#ef4444'
-        }
-      },
-      {
-        name: '成交量',
-        type: 'bar',
-        xAxisIndex: 1,
-        yAxisIndex: 1,
-        data: volumes,
-        itemStyle: { color: '#f07316', opacity: 0.5 }
-      }
+      { name: 'K线', type: 'candlestick', data: prices, itemStyle: { color: '#10b981', color0: '#ef4444', borderColor: '#10b981', borderColor0: '#ef4444' } },
+      { name: '成交量', type: 'bar', xAxisIndex: 1, yAxisIndex: 1, data: volumes, itemStyle: { color: '#f07316', opacity: 0.5 } }
     ]
   })
 }
 
-watch(selectedInterval, () => {
-  fetchHistory()
-})
+watch(selectedInterval, () => fetchHistory())
 
 onMounted(() => {
-  // 先获取一次价格
   fetchPrice()
-  
-  // 连接WebSocket实时推送
-  connectWebSocket()
-
   chart = echarts.init(chartRef.value)
   fetchHistory()
-
+  wsUnsub = wsStore.onMessage((msg) => {
+    if (msg.type === 'price_update' && msg.data) {
+      priceData.value = msg.data
+    }
+  })
   window.addEventListener('resize', () => chart?.resize())
 })
 
 onUnmounted(() => {
-  // 清理WebSocket
-  if (ws) {
-    ws.close()
-  }
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-  }
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer)
-  }
-  
+  if (wsUnsub) wsUnsub()
   chart?.dispose()
 })
 </script>

@@ -13,21 +13,10 @@ const routes = [
     component: () => import('../layouts/MainLayout.vue'),
     meta: { requiresAuth: true },
     children: [
-      {
-        path: '',
-        name: 'Dashboard',
-        component: () => import('../views/Dashboard.vue')
-      },
-      {
-        path: 'alerts',
-        name: 'Alerts',
-        component: () => import('../views/Alerts.vue')
-      },
-      {
-        path: 'history',
-        name: 'History',
-        component: () => import('../views/History.vue')
-      },
+      { path: '', name: 'Dashboard', component: () => import('../views/Dashboard.vue') },
+      { path: 'alerts', name: 'Alerts', component: () => import('../views/Alerts.vue') },
+      { path: 'events', name: 'Events', component: () => import('../views/Events.vue') },
+      { path: 'history', redirect: '/events' },
       {
         path: 'users',
         name: 'Users',
@@ -45,7 +34,6 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   const authStore = useAuthStore()
-  
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     next('/login')
   } else if (to.meta.guest && authStore.isAuthenticated) {
