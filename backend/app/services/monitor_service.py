@@ -1,12 +1,11 @@
 import logging
 import asyncio
-from typing import List, Dict, Any, Set
+from typing import Dict, Any, Set, List, Optional
 from datetime import datetime
 import json
 
 from app.core.database import AsyncSessionLocal
 from app.core.redis import redis_client
-from app.core.config import settings
 from app.services.price_service import price_service
 from app.services.alert_service import alert_service
 
@@ -14,131 +13,153 @@ logger = logging.getLogger(__name__)
 
 
 class MonitorService:
-    """行情监控服务 - 负责定时获取价格、检查预警、推送通知"""
-    
+    """行情监控服务
+
+    职责：
+    1. 周期性拉取最新价格并缓存（Redis + 内存）。
+    2. 对全部用户的预警规则做一次状态机评估，并按 user_id 分发事件。
+    3. 维护 WebSocket 连接，按用户广播 price_update / alert_event。
+    4. 通过 asyncio.Lock 保证一次扫描期间不会被并发轮询重入，避免重复落库。
+    """
+
     def __init__(self):
-        self._websocket_clients: Set = set()
+        # user_id -> set[WebSocket]，未登录连接归到 0（仅看价格）
+        self._clients_by_user: Dict[int, Set] = {}
         self._current_price: Dict[str, Any] = {}
-        self._running = False
-    
+        self._scan_lock = asyncio.Lock()
+
+    # ------------------------------------------------------------------
+    # WebSocket 客户端管理
+    # ------------------------------------------------------------------
     @property
-    def websocket_clients(self) -> Set:
-        return self._websocket_clients
-    
-    def register_client(self, websocket):
-        """注册WebSocket客户端"""
-        self._websocket_clients.add(websocket)
-        logger.info(f"WebSocket client registered, total: {len(self._websocket_clients)}")
-    
+    def total_clients(self) -> int:
+        return sum(len(s) for s in self._clients_by_user.values())
+
+    def register_client(self, websocket, user_id: Optional[int] = None):
+        uid = int(user_id) if user_id is not None else 0
+        self._clients_by_user.setdefault(uid, set()).add(websocket)
+        logger.info(
+            f"WebSocket client registered, user={uid}, total={self.total_clients}"
+        )
+
     def unregister_client(self, websocket):
-        """注销WebSocket客户端"""
-        self._websocket_clients.discard(websocket)
-        logger.info(f"WebSocket client unregistered, total: {len(self._websocket_clients)}")
-    
-    async def broadcast(self, message: Dict[str, Any]):
-        """广播消息给所有WebSocket客户端"""
-        if not self._websocket_clients:
+        for uid, clients in list(self._clients_by_user.items()):
+            if websocket in clients:
+                clients.discard(websocket)
+                if not clients:
+                    self._clients_by_user.pop(uid, None)
+                break
+        logger.info(f"WebSocket client unregistered, total={self.total_clients}")
+
+    async def _send_to_clients(self, clients: Set, message: Dict[str, Any]):
+        if not clients:
             return
-        
-        message_str = json.dumps(message, default=str)
-        dead_clients = set()
-        
-        for client in self._websocket_clients:
+        payload = json.dumps(message, default=str)
+        dead = set()
+        for c in list(clients):
             try:
-                await client.send_text(message_str)
+                await c.send_text(payload)
             except Exception as e:
-                logger.warning(f"Failed to send to client: {e}")
-                dead_clients.add(client)
-        
-        # 清理断开的客户端
-        for client in dead_clients:
-            self._websocket_clients.discard(client)
-    
+                logger.warning(f"WS send failed: {e}")
+                dead.add(c)
+        for c in dead:
+            clients.discard(c)
+
+    async def broadcast_all(self, message: Dict[str, Any]):
+        """对所有连接广播（用于价格更新这种公共消息）。"""
+        for clients in list(self._clients_by_user.values()):
+            await self._send_to_clients(clients, message)
+
+    async def broadcast_to_user(self, user_id: int, message: Dict[str, Any]):
+        """只对指定用户广播（用于私密的预警事件）。"""
+        clients = self._clients_by_user.get(int(user_id))
+        if clients:
+            await self._send_to_clients(clients, message)
+
+    # ------------------------------------------------------------------
+    # 价格拉取
+    # ------------------------------------------------------------------
     async def fetch_and_cache_price(self) -> Dict[str, Any]:
-        """获取价格并缓存到Redis"""
         try:
             price_data = await price_service.get_current_price()
             self._current_price = price_data
-            
-            # 缓存到Redis
-            await redis_client.set(
-                "btc:price:current",
-                price_data,
-                expire=30
-            )
-            
-            logger.debug(f"Price fetched and cached: ${price_data['price']:.2f}")
+            await redis_client.set("btc:price:current", price_data, expire=30)
+            logger.debug(f"Price cached: ${price_data.get('price', 0):.2f}")
             return price_data
         except Exception as e:
             logger.error(f"Failed to fetch price: {e}")
             return self._current_price
-    
-    async def check_alerts(self, current_price: float):
-        """检查并触发预警"""
-        async with AsyncSessionLocal() as db:
-            try:
-                triggered_alerts = await alert_service.check_and_trigger_alerts(db, current_price)
-                
-                if triggered_alerts:
-                    logger.info(f"Triggered {len(triggered_alerts)} alerts")
-                    
-                    # 广播预警通知
-                    for alert in triggered_alerts:
-                        await self.broadcast({
-                            "type": "alert_triggered",
-                            "data": {
-                                "alert_id": alert.id,
-                                "alert_name": alert.name,
-                                "alert_type": alert.alert_type.value,
-                                "target_price": alert.target_price,
-                                "current_price": current_price,
-                                "message": f"预警触发: {alert.name}",
-                                "triggered_at": datetime.now().isoformat()
-                            }
-                        })
-                        
-                        # 发布到Redis频道
-                        await redis_client.publish("alerts:triggered", {
-                            "alert_id": alert.id,
-                            "alert_name": alert.name,
-                            "current_price": current_price
-                        })
-                        
-            except Exception as e:
-                logger.error(f"Failed to check alerts: {e}")
-    
-    async def monitor_task(self):
-        """监控任务 - 定时执行"""
-        try:
-            # 获取最新价格
-            price_data = await self.fetch_and_cache_price()
-            
-            if not price_data:
-                return
-            
-            current_price = price_data.get("price", 0)
-            
-            # 广播价格更新
-            await self.broadcast({
-                "type": "price_update",
-                "data": price_data
-            })
-            
-            # 检查预警
-            await self.check_alerts(current_price)
-            
-        except Exception as e:
-            logger.error(f"Monitor task error: {e}")
-    
+
     async def get_cached_price(self) -> Dict[str, Any]:
-        """获取缓存的价格"""
-        # 先尝试从Redis获取
         cached = await redis_client.get_json("btc:price:current")
         if cached:
             return cached
-        
-        # 如果没有缓存，获取新数据
         return await self.fetch_and_cache_price()
+
+    # ------------------------------------------------------------------
+    # 调度入口
+    # ------------------------------------------------------------------
+    async def monitor_task(self):
+        """每个调度周期被调用一次。带锁，防止并发重入。"""
+        if self._scan_lock.locked():
+            logger.debug("Previous monitor scan still running, skip this tick")
+            return
+
+        async with self._scan_lock:
+            try:
+                price_data = await self.fetch_and_cache_price()
+                if not price_data:
+                    return
+
+                current_price = float(price_data.get("price") or 0)
+
+                # 公共：价格更新广播
+                await self.broadcast_all({
+                    "type": "price_update",
+                    "data": price_data,
+                })
+
+                # 状态机评估并落库
+                events = await self._evaluate(current_price)
+
+                # 按 user 分发事件（已落库 -> 再推送，确保前端拿到的事件可在历史接口里找到）
+                for ev in events:
+                    msg_type = (
+                        "alert_triggered" if ev["kind"] == "triggered"
+                        else "alert_resolved"
+                    )
+                    payload = {
+                        "type": msg_type,
+                        "data": {
+                            "alert": ev["alert"],
+                            "history": ev["history"],
+                            "current_price": current_price,
+                            "ts": datetime.utcnow().isoformat(),
+                        },
+                    }
+                    await self.broadcast_to_user(ev["user_id"], payload)
+
+                    # 同时通过 Redis pub/sub 暴露给其他可能的消费者
+                    await redis_client.publish(
+                        f"alerts:user:{ev['user_id']}",
+                        payload["data"],
+                    )
+            except Exception as e:
+                logger.error(f"monitor_task failed: {e}", exc_info=True)
+
+    async def _evaluate(self, current_price: float) -> List[Dict[str, Any]]:
+        async with AsyncSessionLocal() as db:
+            try:
+                events = await alert_service.evaluate_price(db, current_price)
+                if events:
+                    logger.info(
+                        f"Evaluation produced {len(events)} events at price={current_price}"
+                    )
+                return events
+            except Exception as e:
+                logger.error(f"alert evaluate failed: {e}", exc_info=True)
+                await db.rollback()
+                return []
 
 
 # 单例
