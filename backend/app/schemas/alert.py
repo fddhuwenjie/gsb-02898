@@ -58,6 +58,7 @@ class AlertResponse(BaseModel):
     is_repeat: bool
     cooldown_seconds: int
     last_triggered_at: Optional[datetime] = None
+    cooldown_until: Optional[datetime] = None
     last_price: Optional[float] = None
     trigger_count: int = 0
     created_at: datetime

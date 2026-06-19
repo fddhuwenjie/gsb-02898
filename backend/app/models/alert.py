@@ -49,6 +49,7 @@ class Alert(Base):
     is_repeat = Column(Boolean, default=True, nullable=False)
     cooldown_seconds = Column(Integer, default=300, nullable=False)
     last_triggered_at = Column(DateTime(timezone=True), nullable=True)
+    cooldown_until = Column(DateTime(timezone=True), nullable=True)
     last_price = Column(Float, nullable=True)
     trigger_count = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

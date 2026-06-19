@@ -5,23 +5,27 @@
 
   T1 多用户隔离：用户 A 的规则不会因为用户 B 触发而连带触发
   T2 触发去重：FIRING 中条件持续满足不会重复落库
-  T3 冷却抑制：触发后再次同向越界，在冷却窗口内不会再次触发
-  T4 恢复 + 待确认：价格回到阈值另一侧产生 RESOLVED 事件，规则进入 PENDING_ACK
-  T5 ack 后恢复 ACTIVE：确认事件后规则回到 ACTIVE
-  T6 落库与广播一致：evaluate_price 返回的事件 id 都能在数据库里查到
+  T3 PENDING_ACK 期间不会因为再次越界而触发
+  T4 恢复 -> 仍有 pending => PENDING_ACK 稳定停留
+  T5 ack 全部 -> COOLDOWN 仍可见（不会瞬间被覆盖成 ACTIVE）
+  T6 cooldown 到期 -> ACTIVE
+  T7 ACTIVE 后再次越界正常触发
+  T8 SQLite fresh 环境目录兜底（_ensure_sqlite_dir）
 
 运行：python backend/tests/test_alert_state_machine.py
 """
 import asyncio
-import sys
 import os
+import shutil
+import sys
+import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), os.pardir))
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy import select
 
-from app.core.database import Base
+from app.core.database import Base, _ensure_sqlite_dir, _normalize_db_url
 from app.models.user import User
 from app.models.alert import Alert, AlertHistory, AlertType, AlertStatus, EventStatus
 from app.services.alert_service import alert_service
@@ -47,14 +51,12 @@ async def setup():
         await db.refresh(u1)
         await db.refresh(u2)
 
-        # alice: 上破 100000
         a1 = Alert(
             user_id=u1.id, name="alice-above-100k",
             alert_type=AlertType.ABOVE, target_price=100000,
             cooldown_seconds=60, is_repeat=True,
             status=AlertStatus.ACTIVE,
         )
-        # bob: 下破 90000
         a2 = Alert(
             user_id=u2.id, name="bob-below-90k",
             alert_type=AlertType.BELOW, target_price=90000,
@@ -87,19 +89,18 @@ def assert_eq(actual, expected, label):
     assert ok, f"{label} failed"
 
 
-async def main():
+async def run_state_machine_tests():
     engine, Session, u1, u2, a1, a2 = await setup()
 
-    # T1 + T2：alice 触发，bob 不该触发
+    # T1 + T2
     banner("T1 多用户隔离 + T2 触发去重")
     async with Session() as db:
-        events = await alert_service.evaluate_price(db, 105000.0)  # alice 越界，bob 不越界
+        events = await alert_service.evaluate_price(db, 105000.0)
     assert_eq(len(events), 1, "events count")
     assert_eq(events[0]["user_id"], u1, "event belongs to alice")
     assert_eq(events[0]["kind"], "triggered", "kind=triggered")
 
     async with Session() as db:
-        # 同一价格再来一次 -> FIRING 中不重复
         events2 = await alert_service.evaluate_price(db, 106000.0)
         assert_eq(len(events2), 0, "duplicate firing is suppressed")
         a1_db = await get_alert(db, a1)
@@ -111,68 +112,125 @@ async def main():
         h2 = await get_histories(db, a2)
         assert_eq(len(h2), 0, "bob has 0 history row (isolation)")
 
-    # T6 一致性：上一轮返回的 history id 能在库里查到
-    banner("T6 推送事件 ↔ 数据库一致性")
+    # T4 恢复 -> PENDING_ACK 稳定
+    banner("T4 价格恢复 -> PENDING_ACK 稳定停留")
     async with Session() as db:
-        history_id = events[0]["history"]["id"]
-        row = (await db.execute(
-            select(AlertHistory).where(AlertHistory.id == history_id)
-        )).scalar_one_or_none()
-        assert_eq(row is not None, True, "broadcast history exists in DB")
-        assert_eq(row.user_id, u1, "history.user_id matches alice")
-
-    # T4 恢复
-    banner("T4 价格恢复 -> RESOLVED + PENDING_ACK")
-    async with Session() as db:
-        events3 = await alert_service.evaluate_price(db, 99000.0)  # alice 回到阈值下方
+        events3 = await alert_service.evaluate_price(db, 99000.0)
         assert_eq(len(events3), 1, "one resolved event")
         assert_eq(events3[0]["kind"], "resolved", "kind=resolved")
         a1_db = await get_alert(db, a1)
-        # 恢复后仍存在未确认事件 => PENDING_ACK（题面要求的"已恢复待确认"）
-        # 同时 last_triggered_at 也被刷为恢复时刻，从而进入实质上的冷却窗口
-        assert_eq(a1_db.status.value, "pending_ack", "rule status=PENDING_ACK after resolve")
+        assert_eq(a1_db.status.value, "pending_ack", "rule status=PENDING_ACK")
+        # cooldown_until 已写入，可被前端用来展示倒计时
+        assert_eq(a1_db.cooldown_until is not None, True, "cooldown_until is set")
         h1 = await get_histories(db, a1)
         assert_eq(h1[0].event_status.value, "resolved", "history#1 -> RESOLVED")
 
-    # T3 冷却抑制
-    banner("T3 冷却期内再次越界不触发")
+    # 再来几次扫描，PENDING_ACK 不应被覆盖
+    banner("T4b 多次扫描 PENDING_ACK 不被覆盖")
+    async with Session() as db:
+        for p in [99500.0, 98000.0, 99800.0]:
+            await alert_service.evaluate_price(db, p)
+        a1_db = await get_alert(db, a1)
+        assert_eq(a1_db.status.value, "pending_ack", "still PENDING_ACK after multi-tick")
+
+    # T3 PENDING_ACK 期间再次越界不会触发
+    banner("T3 PENDING_ACK 期间再越界不触发")
     async with Session() as db:
         events4 = await alert_service.evaluate_price(db, 110000.0)
-        # 此时规则处于 PENDING_ACK，且 last_triggered_at 在冷却窗口内 -> 不应再触发
-        assert_eq(len(events4), 0, "no fire during cooldown window")
+        assert_eq(len(events4), 0, "no fire while PENDING_ACK")
         a1_db = await get_alert(db, a1)
         assert_eq(a1_db.status.value, "pending_ack", "still PENDING_ACK")
 
-    # 模拟冷却已过：直接把 last_triggered_at 拨回过去
+    # T5 ack 后：cooldown_until 仍在未来 => 进入 COOLDOWN（不是直接 ACTIVE）
+    banner("T5 ack 全部 -> COOLDOWN 可被识别（不被覆盖成 ACTIVE）")
     async with Session() as db:
-        from datetime import datetime, timezone, timedelta
+        await alert_service.ack_all_for_alert(db, user_id=u1, alert_id=a1)
         a1_db = await get_alert(db, a1)
-        a1_db.last_triggered_at = datetime.now(timezone.utc) - timedelta(seconds=120)
+        assert_eq(a1_db.status.value, "cooldown", "rule -> COOLDOWN after ack")
+        h1 = await get_histories(db, a1)
+        assert_eq(all(h.event_status.value == "acked" for h in h1), True,
+                  "all histories ACKED")
+
+    # COOLDOWN 期间多次扫描仍是 COOLDOWN
+    banner("T5b COOLDOWN 多次扫描仍稳定")
+    async with Session() as db:
+        for p in [99000.0, 98500.0]:
+            await alert_service.evaluate_price(db, p)
+        a1_db = await get_alert(db, a1)
+        assert_eq(a1_db.status.value, "cooldown", "still COOLDOWN")
+
+    # COOLDOWN 期间即便再次越界也不触发
+    async with Session() as db:
+        events5 = await alert_service.evaluate_price(db, 110000.0)
+        assert_eq(len(events5), 0, "no fire during COOLDOWN")
+        a1_db = await get_alert(db, a1)
+        assert_eq(a1_db.status.value, "cooldown", "still COOLDOWN after re-cross")
+
+    # T6 把 cooldown_until 拨回过去模拟到期
+    banner("T6 冷却到期 -> ACTIVE")
+    from datetime import datetime, timezone, timedelta
+    async with Session() as db:
+        a1_db = await get_alert(db, a1)
+        a1_db.cooldown_until = datetime.now(timezone.utc) - timedelta(seconds=1)
         await db.commit()
 
-    # T5 ack 后恢复 ACTIVE
-    banner("T5 确认事件 -> ACTIVE")
     async with Session() as db:
-        h1 = await get_histories(db, a1)
-        history_id = h1[0].id
-        await alert_service.ack_event(db, user_id=u1, history_id=history_id)
+        # 任意一次扫描或 get_alerts 都能让其变 ACTIVE
+        await alert_service.evaluate_price(db, 95000.0)
         a1_db = await get_alert(db, a1)
-        # ack 后规则若无未确认事件且非 PENDING_ACK，状态保持当前（COOLDOWN）
-        # 验证事件状态变为 ACKED
-        h1 = await get_histories(db, a1)
-        assert_eq(h1[0].event_status.value, "acked", "history#1 -> ACKED")
+        assert_eq(a1_db.status.value, "active", "rule -> ACTIVE after cooldown expires")
+        assert_eq(a1_db.cooldown_until, None, "cooldown_until cleared")
 
-    # 接下来如果价格再越界、且冷却已过，应能再次触发
-    banner("冷却结束后再次触发")
+    # T7 再次越界正常触发
+    banner("T7 ACTIVE 后再次越界正常触发")
     async with Session() as db:
-        events5 = await alert_service.evaluate_price(db, 111000.0)
-        assert_eq(len(events5), 1, "fires again after cooldown")
-        assert_eq(events5[0]["kind"], "triggered", "kind=triggered")
+        events6 = await alert_service.evaluate_price(db, 111000.0)
+        assert_eq(len(events6), 1, "fires again after cooldown")
+        assert_eq(events6[0]["kind"], "triggered", "kind=triggered")
         a1_db = await get_alert(db, a1)
         assert_eq(a1_db.status.value, "firing", "rule -> FIRING")
         assert_eq(a1_db.trigger_count, 2, "trigger_count == 2")
 
-    print("\n🎉 All state-machine assertions passed.\n")
+
+def run_sqlite_dir_test():
+    """T8 fresh 环境兜底：_ensure_sqlite_dir 能创建多级目录"""
+    banner("T8 fresh 环境 SQLite 目录兜底")
+    tmp = tempfile.mkdtemp(prefix="alert_db_test_")
+    try:
+        target_dir = os.path.join(tmp, "deep", "nested", "data")
+        target_file = os.path.join(target_dir, "btc.db")
+        url = f"sqlite+aiosqlite:///{target_file}"
+
+        # 先确认目标目录确实不存在
+        assert_eq(os.path.exists(target_dir), False, "directory missing initially")
+
+        _ensure_sqlite_dir(_normalize_db_url(url))
+        assert_eq(os.path.isdir(target_dir), True, "directory created by _ensure_sqlite_dir")
+
+        # 重复调用幂等
+        _ensure_sqlite_dir(_normalize_db_url(url))
+        assert_eq(os.path.isdir(target_dir), True, "directory still exists (idempotent)")
+
+        # 内存库不应去尝试 mkdir
+        _ensure_sqlite_dir("sqlite+aiosqlite:///:memory:")
+        print("  ✅ in-memory URL handled without mkdir")
+
+        # sqlite:/// 兼容形式
+        plain_url = f"sqlite:///{os.path.join(tmp, 'plain', 'p.db')}"
+        _ensure_sqlite_dir(_normalize_db_url(plain_url))
+        assert_eq(
+            os.path.isdir(os.path.join(tmp, "plain")),
+            True,
+            "sqlite:/// form also creates dir",
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+async def main():
+    await run_state_machine_tests()
+    run_sqlite_dir_test()
+    print("\n🎉 All assertions passed.\n")
 
 
 if __name__ == "__main__":

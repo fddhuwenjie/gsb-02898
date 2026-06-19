@@ -25,7 +25,7 @@
     </div>
 
     <!-- 当前价格 + 状态汇总 -->
-    <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-6 gap-4">
       <div class="card md:col-span-2 bg-gradient-to-r from-primary-500/10 to-transparent border-primary-500/20">
         <p class="text-dark-400 text-sm">BTC 当前价格</p>
         <p class="text-3xl font-bold text-white mt-1">${{ formatPrice(currentPrice) }}</p>
@@ -39,8 +39,12 @@
         <p class="text-2xl font-bold text-red-400 mt-1">{{ stats.firing }}</p>
       </div>
       <div class="card">
-        <p class="text-dark-400 text-xs">冷却 / 待确认</p>
-        <p class="text-2xl font-bold text-yellow-400 mt-1">{{ stats.cooldown + stats.pending }}</p>
+        <p class="text-dark-400 text-xs">冷却中</p>
+        <p class="text-2xl font-bold text-blue-300 mt-1">{{ stats.cooldown }}</p>
+      </div>
+      <div class="card">
+        <p class="text-dark-400 text-xs">待确认</p>
+        <p class="text-2xl font-bold text-yellow-400 mt-1">{{ stats.pending }}</p>
       </div>
     </div>
 
@@ -90,6 +94,12 @@
                 >
                   {{ statusMap[alert.status] || alert.status }}
                 </span>
+                <div
+                  v-if="cooldownRemaining(alert) > 0"
+                  class="text-[10px] text-dark-400 mt-1"
+                >
+                  剩余冷却 {{ cooldownRemaining(alert) }}s
+                </div>
               </td>
               <td class="text-dark-300 text-sm">{{ alert.cooldown_seconds }}s</td>
               <td class="text-dark-300 text-sm">{{ alert.trigger_count }}</td>
@@ -261,10 +271,12 @@ const currentPrice = ref(0)
 const showDeleteConfirm = ref(false)
 const deleteTargetId = ref(null)
 const wsConnected = ref(false)
+const nowTs = ref(Date.now())
 
 let ws = null
 let reconnectTimer = null
 let heartbeatTimer = null
+let tickerTimer = null
 
 const statusMap = {
   active: '激活',
@@ -312,6 +324,14 @@ function formatPrice(p) {
 
 function formatDate(d) {
   return dayjs(d).format('MM-DD HH:mm:ss')
+}
+
+function cooldownRemaining(alert) {
+  // 仅对 cooldown / pending_ack 显示，且需要 cooldown_until
+  if (!alert.cooldown_until) return 0
+  if (!['cooldown', 'pending_ack'].includes(alert.status)) return 0
+  const left = Math.floor((new Date(alert.cooldown_until).getTime() - nowTs.value) / 1000)
+  return left > 0 ? left : 0
 }
 
 function openCreate() {
@@ -468,11 +488,24 @@ onMounted(() => {
   fetchAlerts()
   fetchPrice()
   connectWebSocket()
+  // 每秒刷新时间戳，让"剩余冷却"自然滚动；冷却到 0 时主动拉一次让状态变 ACTIVE
+  tickerTimer = setInterval(() => {
+    const before = nowTs.value
+    nowTs.value = Date.now()
+    const justExpired = alerts.value.some(a =>
+      a.cooldown_until &&
+      ['cooldown', 'pending_ack'].includes(a.status) &&
+      new Date(a.cooldown_until).getTime() <= nowTs.value &&
+      new Date(a.cooldown_until).getTime() > before
+    )
+    if (justExpired) fetchAlerts()
+  }, 1000)
 })
 
 onUnmounted(() => {
   if (ws) ws.close()
   if (reconnectTimer) clearTimeout(reconnectTimer)
   if (heartbeatTimer) clearInterval(heartbeatTimer)
+  if (tickerTimer) clearInterval(tickerTimer)
 })
 </script>
