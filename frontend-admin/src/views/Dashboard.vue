@@ -130,8 +130,10 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import * as echarts from 'echarts'
 import api from '../api'
 import { useToastStore } from '../stores/toast'
+import { useAuthStore } from '../stores/auth'
 
 const toast = useToastStore()
+const authStore = useAuthStore()
 
 const priceData = ref({
   price: 0,
@@ -170,8 +172,9 @@ function formatVolume(volume) {
 }
 
 function connectWebSocket() {
+  const token = authStore.token
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const wsUrl = `${protocol}//${window.location.host}/ws/price`
+  const wsUrl = `${protocol}//${window.location.host}/ws/price?token=${encodeURIComponent(token || '')}`
   
   ws = new WebSocket(wsUrl)
   
@@ -196,9 +199,13 @@ function connectWebSocket() {
       if (message.type === 'price_update' && message.data) {
         priceData.value = message.data
       } else if (message.type === 'alert_triggered' && message.data) {
-        // 显示预警通知
         toast.warning(
           `🔔 ${message.data.alert_name}`,
+          message.data.message || `当前价格: $${formatPrice(message.data.current_price)}`
+        )
+      } else if (message.type === 'alert_recovered' && message.data) {
+        toast.info(
+          `✅ ${message.data.alert_name} 已恢复`,
           message.data.message || `当前价格: $${formatPrice(message.data.current_price)}`
         )
       }

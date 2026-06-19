@@ -1,35 +1,61 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 import logging
 import json
 
 from app.services.monitor_service import monitor_service
+from app.core.security import decode_token
+from app.core.database import AsyncSessionLocal
+from app.models.user import User
+from sqlalchemy import select
 
 router = APIRouter(tags=["WebSocket"])
 logger = logging.getLogger(__name__)
 
 
-@router.websocket("/ws/price")
-async def websocket_price(websocket: WebSocket):
-    """价格实时推送WebSocket"""
-    await websocket.accept()
-    monitor_service.register_client(websocket)
-    
-    logger.info(f"WebSocket connected: {websocket.client}")
-    
+async def _get_user_id_from_token(token: str):
+    if not token:
+        return None
     try:
-        # 发送当前价格
+        payload = decode_token(token)
+        if payload and "sub" in payload:
+            user_id = int(payload["sub"])
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(select(User).where(User.id == user_id))
+                user = result.scalar_one_or_none()
+                if user and user.is_active:
+                    return user_id
+    except Exception as e:
+        logger.warning(f"Invalid WebSocket token: {e}")
+    return None
+
+
+@router.websocket("/ws/price")
+async def websocket_price(
+    websocket: WebSocket,
+    token: str = Query(None)
+):
+    await websocket.accept()
+
+    user_id = await _get_user_id_from_token(token)
+    monitor_service.register_client(websocket, user_id)
+
+    logger.info(f"WebSocket connected: {websocket.client}, user_id={user_id}")
+
+    try:
         price_data = await monitor_service.get_cached_price()
         if price_data:
             await websocket.send_json({
                 "type": "price_update",
                 "data": price_data
             })
-        
-        # 保持连接，接收心跳
+
+        await websocket.send_json({
+            "type": "auth_status",
+            "data": {"authenticated": user_id is not None, "user_id": user_id}
+        })
+
         while True:
             data = await websocket.receive_text()
-            
-            # 处理心跳
             if data == "ping":
                 await websocket.send_text("pong")
             else:
@@ -39,10 +65,10 @@ async def websocket_price(websocket: WebSocket):
                         await websocket.send_json({"type": "pong"})
                 except json.JSONDecodeError:
                     pass
-                    
+
     except WebSocketDisconnect:
         logger.info(f"WebSocket disconnected: {websocket.client}")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
-        monitor_service.unregister_client(websocket)
+        monitor_service.unregister_client(websocket, user_id)

@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # 创建异步引擎
 engine = create_async_engine(
-    settings.DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///"),
+    settings.DATABASE_URL,
     echo=settings.DEBUG,
     future=True
 )
