@@ -10,6 +10,7 @@ from app.core.database import init_db, AsyncSessionLocal
 from app.core.logging_config import setup_logging
 from app.core.security import get_password_hash
 from app.core.redis import redis_client
+from app.core.migrate import run_auto_migration
 from app.core.scheduler import scheduler, start_scheduler, stop_scheduler, add_job
 from app.core.exceptions import AppException
 from app.models.user import User
@@ -58,7 +59,10 @@ async def lifespan(app: FastAPI):
     
     # 初始化数据库
     await init_db()
-    
+
+    # 自动迁移：检测并添加缺失的列
+    await run_auto_migration()
+
     # 连接Redis
     await redis_client.connect()
     
@@ -150,7 +154,8 @@ async def health_check():
         "service": settings.APP_NAME,
         "redis": redis_status,
         "scheduler": scheduler_status,
-        "websocket_clients": len(monitor_service.websocket_clients)
+        "websocket_clients": monitor_service.get_total_client_count(),
+        "connected_users": monitor_service.get_connected_user_count()
     }
 
 
